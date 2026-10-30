@@ -1,0 +1,980 @@
+<script>
+/* ============================================================
+   OLYMPIAN GODS KANBAN QUIZ  -  script.html
+   Literature 6, Matayom 6 (M6/14 and M6/15)
+
+   How the answer key stays safe:
+   the god cards only know opaque IDs (z1 ... z12). The god each ID
+   belongs to lives in Code.gs. "Check answers" and "Submit" both go
+   to the server, which does the marking.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  /* ----------------------------------------------------------
+     1. DATA
+  ---------------------------------------------------------- */
+  var TOTAL = 12;
+
+  var NAMES = [
+  "Zeus",
+  "Hera",
+  "Poseidon",
+  "Demeter",
+  "Athena",
+  "Apollo",
+  "Artemis",
+  "Ares",
+  "Aphrodite",
+  "Hephaestus",
+  "Hermes",
+  "Hestia"
+];
+
+  // 5 levels x 12 cards = 60 points. Only the tiles live here; the answers are on the server.
+  var LV = [
+    { name: 'Faces', title: 'God name bank', hint: 'Match each name to the picture of the god.', items: NAMES },
+    { name: 'Domain', title: 'Domain bank', hint: 'Each card now shows its god. Match the domain.', items: [
+  "Sky, thunder & kingship",
+  "Marriage & family",
+  "Sea & earthquakes",
+  "Harvest & farming",
+  "Wisdom & strategy",
+  "Sun, music & prophecy",
+  "The hunt & the moon",
+  "War & bloodshed",
+  "Love & beauty",
+  "Fire & the forge",
+  "Messages, travel & trade",
+  "Hearth & home"
+] },
+    { name: 'Symbol', title: 'Symbol bank', hint: 'Match the symbol or sacred object.', items: [
+  "Thunderbolt",
+  "Peacock",
+  "Trident",
+  "Wheat sheaf",
+  "Owl",
+  "Lyre",
+  "Silver bow",
+  "Spear & helmet",
+  "Dove",
+  "Hammer & anvil",
+  "Caduceus",
+  "Hearth fire"
+] },
+    { name: 'Roman name', title: 'Roman name bank', hint: 'Match the Roman (Latin) name.', items: [
+  "Jupiter",
+  "Juno",
+  "Neptune",
+  "Ceres",
+  "Minerva",
+  "Apollo",
+  "Diana",
+  "Mars",
+  "Venus",
+  "Vulcan",
+  "Mercury",
+  "Vesta"
+] },
+    { name: 'Story clue', title: 'Story clue bank', hint: 'Match the story clue to the god.', items: [
+  "Overthrew his father Cronus",
+  "Queen of Olympus, wife of Zeus",
+  "Won the sea by drawing lots",
+  "Her daughter Persephone was taken",
+  "Born from Zeus's head",
+  "Slew the Python at Delphi",
+  "Twin sister who vowed never to marry",
+  "Caught in a golden net with Aphrodite",
+  "Rose from the sea foam",
+  "Thrown from Olympus; lame blacksmith",
+  "Stole Apollo's cattle as a baby",
+  "Eldest child of Cronus and Rhea"
+] }
+  ];
+
+  var ZONES = ["z1", "z2", "z3", "z4", "z5", "z6", "z7", "z8", "z9", "z10", "z11", "z12"].map(function (id) { return { id: id }; });
+
+  // Shown after a correct answer in Level 1. None of these give away a later answer.
+  var FACTS = {
+    'Zeus': 'Hidden on Crete as a baby so his father could not swallow him.',
+    'Hera': 'Her most famous temples stood at Argos and on the island of Samos.',
+    'Poseidon': 'He competed with Athena to become the patron of Athens.',
+    'Demeter': 'Her worship centred on the secret Eleusinian Mysteries.',
+    'Athena': 'Patron goddess of Athens. The Parthenon is named after her.',
+    'Apollo': 'His oracle at Delphi was thought to mark the centre of the world.',
+    'Artemis': 'Her temple at Ephesus was one of the Seven Wonders of the Ancient World.',
+    'Ares': "Even Zeus calls him the most hated of the gods in Homer's Iliad.",
+    'Aphrodite': 'Her cult was strongest on Cyprus, which the Greeks called her island.',
+    'Hephaestus': 'His temple, the Hephaisteion, still stands above the Athenian Agora.',
+    'Hermes': 'He also guided the souls of the dead to the Underworld.',
+    'Hestia': 'Every Greek city kept a public hearth for her, and offerings began with her.'
+  };
+
+  var state = {
+    student: null,
+    zoneContent: {},
+    status: {},
+    locked: {},
+    selected: null,
+    images: {},
+    level: 1,
+    best: {},
+    labels: null,
+    dragName: null,
+    checks: 0,
+    startedAt: 0,
+    timerId: null,
+    submitted: false,
+    revealed: false,
+    result: null,
+    sheetLoaded: false
+  };
+
+  var zoneEl = {};
+  var zLabelEl = {};
+  var bankEl = {};
+  var modalHandlers = { ok: null, cancel: null };
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(text) {
+    return String(text).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function shuffle(list) {
+    var a = list.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtTime(sec) { return pad2(Math.floor(sec / 60)) + ':' + pad2(sec % 60); }
+
+  function elapsedSeconds() {
+    if (!state.startedAt) return 0;
+    return Math.max(0, Math.round((Date.now() - state.startedAt) / 1000));
+  }
+
+  function curLv() { return LV[state.level - 1]; }
+  function disp(name) { return name; }
+  // Country a circle stands for, once the student has placed it correctly
+  function countryOf(zoneId) {
+    if (state.level === 1) return state.zoneContent[zoneId];
+    return state.labels ? state.labels[zoneId] : undefined;
+  }
+  function overall() { var t = 0; for (var k in state.best) { if (state.best.hasOwnProperty(k)) t += state.best[k]; } return t; }
+  function unlocked(n) { return n === 1 || state.best[n - 1] !== undefined; }
+
+  function renderLevelBar() {
+    var bar = $('levelBar');
+    bar.innerHTML = '';
+    LV.forEach(function (lv, i) {
+      var n = i + 1, b = document.createElement('button'), ok = unlocked(n);
+      b.type = 'button';
+      b.className = 'lvbtn' + (n === state.level ? ' current' : '') + (state.best[n] !== undefined ? ' done' : '') + (ok ? '' : ' locked');
+      b.disabled = !ok;
+      b.textContent = (ok ? '' : '🔒 ') + 'L' + n + ' ' + lv.name + (state.best[n] !== undefined ? '  ' + state.best[n] + '/' + TOTAL : '');
+      b.addEventListener('click', function () { gotoLevel(n); });
+      bar.appendChild(b);
+    });
+    var t = document.createElement('span');
+    t.className = 'lvtotal';
+    t.textContent = 'Total ' + overall() + ' / ' + (LV.length * TOTAL);
+    bar.appendChild(t);
+  }
+
+  function applyLevelUI() {
+    $('bankTitle').textContent = curLv().title;
+    $('bankHint').textContent = curLv().hint + (state.level === 1 && !Object.keys(state.images).length ? ' (Teacher: no pictures yet. Add picture links in the Gods tab of the Sheet.)' : '');
+    ZONES.forEach(function (z) {
+      var l = zLabelEl[z.id];
+      l.textContent = state.labels ? state.labels[z.id] : '';
+      l.hidden = !(state.level > 1 && state.labels);
+    });
+    renderLevelBar();
+  }
+
+  function gotoLevel(n) {
+    if (!unlocked(n) || (n === state.level && !state.submitted)) return;
+    var go = function () {
+      state.level = n;
+      $('resultOverlay').hidden = true;
+      buildBank();
+      resetBoard();
+      startTimer();
+      applyLevelUI();
+      setFeedback('Level ' + n + ': ' + LV[n - 1].name + '. ' + LV[n - 1].hint);
+    };
+    if (!state.submitted && placedCount() > 0) {
+      showModal({ title: 'Change level?', body: 'The answers on this screen are not submitted and will be cleared.',
+                  okText: 'Change level', cancelText: 'Stay here', onOk: go });
+    } else {
+      go();
+    }
+  }
+
+  function placedCount() { return Object.keys(state.zoneContent).length; }
+  function lockedCount() { return Object.keys(state.locked).length; }
+
+  function nameIsPlaced(name) {
+    for (var id in state.zoneContent) {
+      if (state.zoneContent.hasOwnProperty(id) && state.zoneContent[id] === name) return id;
+    }
+    return null;
+  }
+
+  function getPlacements() {
+    var out = {};
+    for (var id in state.zoneContent) {
+      if (state.zoneContent.hasOwnProperty(id)) out[id] = state.zoneContent[id];
+    }
+    return out;
+  }
+
+  /* ----------------------------------------------------------
+     3. DIALOGS AND LOADING
+  ---------------------------------------------------------- */
+  function showModal(opts) {
+    $('modalTitle').textContent = opts.title || 'Message';
+    var body = $('modalBody');
+    body.textContent = opts.body || '';
+    body.style.whiteSpace = 'pre-line';
+    $('modalOk').textContent = opts.okText || 'OK';
+    var cancel = $('modalCancel');
+    if (opts.cancelText === null || opts.cancelText === undefined) {
+      cancel.hidden = true;
+    } else {
+      cancel.hidden = false;
+      cancel.textContent = opts.cancelText;
+    }
+    modalHandlers.ok = opts.onOk || null;
+    modalHandlers.cancel = opts.onCancel || null;
+    $('modal').hidden = false;
+    $('modalOk').focus();
+  }
+
+  function closeModal(which) {
+    $('modal').hidden = true;
+    var fn = modalHandlers[which];
+    modalHandlers.ok = null;
+    modalHandlers.cancel = null;
+    if (typeof fn === 'function') fn();
+  }
+
+  function showLoading(text) {
+    $('loadingText').textContent = text || 'Working...';
+    $('loading').hidden = false;
+  }
+  function hideLoading() { $('loading').hidden = true; }
+
+  function callServer(fnName, args, onOk, loadingText) {
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      showModal({
+        title: 'Open the web app link',
+        body: 'This page needs to be opened from the web app link, not as a plain file.',
+        cancelText: null
+      });
+      return;
+    }
+    showLoading(loadingText);
+    var runner = google.script.run
+      .withSuccessHandler(function (res) {
+        hideLoading();
+        onOk(res);
+      })
+      .withFailureHandler(function (err) {
+        hideLoading();
+        showModal({
+          title: 'Connection problem',
+          body: 'The server could not be reached. Check your internet and try again.\n(' +
+                (err && err.message ? err.message : String(err)) + ')',
+          cancelText: null
+        });
+      });
+    runner[fnName].apply(runner, args);
+  }
+
+  /* ----------------------------------------------------------
+     4. BUILD THE MAP AND THE NAME BANK
+  ---------------------------------------------------------- */
+  function buildBoard() {
+    var stage = $('board');
+    stage.innerHTML = '';
+    ZONES.forEach(function (z, idx) {
+      var card = document.createElement('div');
+      card.className = 'gcard';
+      var pic = document.createElement('div');
+      pic.className = 'gpic';
+      pic.id = 'pic_' + z.id;
+      pic.innerHTML = '<span class="gnum">' + (idx + 1) + '</span>';
+      var nm = document.createElement('div');
+      nm.className = 'gname';
+      nm.hidden = true;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'zone';
+      card.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = 'move'; } catch (err) { /* ignore */ }
+      });
+      card.addEventListener('dragenter', function (e) { e.preventDefault(); b.classList.add('over'); card.classList.add('over'); });
+      card.addEventListener('dragleave', function (e) {
+        if (!card.contains(e.relatedTarget)) { b.classList.remove('over'); card.classList.remove('over'); }
+      });
+      card.addEventListener('drop', function (e) {
+        e.preventDefault();
+        b.classList.remove('over');
+        card.classList.remove('over');
+        var name = '';
+        try { name = e.dataTransfer.getData('text/plain'); } catch (err) { name = ''; }
+        if (!name) name = state.dragName || '';
+        if (curLv().items.indexOf(name) !== -1) tryPlace(name, z.id);
+        state.dragName = null;
+      });
+      card.addEventListener('click', function () { onZoneClick(z.id); });
+      card.appendChild(pic);
+      card.appendChild(nm);
+      card.appendChild(b);
+      stage.appendChild(card);
+      zoneEl[z.id] = b;
+      zLabelEl[z.id] = nm;
+    });
+  }
+
+  /** Puts the teacher's pictures on the cards. A broken link falls back to the numbered card. */
+  function setPictures(images) {
+    ZONES.forEach(function (z, idx) {
+      var url = images && images[z.id];
+      var pic = $('pic_' + z.id);
+      if (!url || !pic) return;
+      var img = new Image();
+      img.alt = 'Picture of god ' + (idx + 1);
+      img.referrerPolicy = 'no-referrer';
+      img.onload = function () { pic.innerHTML = ''; pic.appendChild(img); };
+      img.src = url;
+    });
+  }
+
+  function buildBank() {
+    var bank = $('bank');
+    bank.innerHTML = '';
+    bankEl = {};
+    shuffle(curLv().items).forEach(function (name) {
+      var el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'country';
+      el.draggable = true;
+      el.textContent = name;
+      el.dataset.country = name;
+      el.addEventListener('dragstart', function (e) {
+        if (el.classList.contains('used') || state.submitted) { e.preventDefault(); return; }
+        try {
+          e.dataTransfer.setData('text/plain', name);
+          e.dataTransfer.effectAllowed = 'move';
+        } catch (err) { /* some browsers block this - state.dragName covers it */ }
+        state.dragName = name;
+        el.classList.add('dragging');
+        selectCountry(name, true);
+      });
+      el.addEventListener('dragend', function () {
+        el.classList.remove('dragging');
+        state.dragName = null;
+      });
+      el.addEventListener('click', function () { selectCountry(name, false); });
+      bank.appendChild(el);
+      bankEl[name] = el;
+    });
+  }
+
+  /* ----------------------------------------------------------
+     5. PLAYING THE ACTIVITY
+  ---------------------------------------------------------- */
+  function setFeedback(text, kind) {
+    var f = $('feedback');
+    f.textContent = text || '';
+    f.className = kind || '';
+  }
+
+  function armZones(on) {
+    Object.keys(zoneEl).forEach(function (id) {
+      zoneEl[id].classList.toggle('armed', !!on);
+    });
+  }
+
+  function clearSelection() {
+    state.selected = null;
+    Object.keys(bankEl).forEach(function (n) { bankEl[n].classList.remove('selected'); });
+    armZones(false);
+  }
+
+  function selectCountry(name, fromDrag) {
+    if (state.submitted) return;
+    if (nameIsPlaced(name)) return;
+    if (!fromDrag && state.selected === name) {
+      clearSelection();
+      setFeedback('');
+      return;
+    }
+    clearSelection();
+    state.selected = name;
+    bankEl[name].classList.add('selected');
+    armZones(true);
+    if (!fromDrag) setFeedback('Selected: ' + disp(name) + '. Now tap the god card.');
+  }
+
+  function renderZone(id) {
+    var el = zoneEl[id];
+    var name = state.zoneContent[id];
+    var cls = 'zone';
+    if (name) cls += ' filled';
+    if (state.status[id]) cls += ' ' + state.status[id];
+    if (state.selected && !name) cls += ' armed';
+    el.className = cls;
+    el.textContent = name || 'Drop a tile here';
+    if (name) {
+      el.setAttribute('aria-label', disp(name) + (state.status[id] === 'correct' ? ', correct' : state.status[id] === 'wrong' ? ', wrong' : ''));
+    } else {
+      el.setAttribute('aria-label', 'Empty card slot');
+    }
+  }
+
+  function refreshBank() {
+    curLv().items.forEach(function (name) {
+      var used = !!nameIsPlaced(name);
+      bankEl[name].classList.toggle('used', used);
+      bankEl[name].draggable = !used && !state.submitted;
+      if (used) bankEl[name].classList.remove('selected');
+    });
+  }
+
+  function updateCounts() {
+    var placed = placedCount();
+    var text = 'Placed: ' + placed + ' / ' + TOTAL;
+    if (state.submitted && state.result) {
+      text = 'Final score: ' + state.result.score + ' / ' + state.result.total;
+    } else if (state.checks > 0) {
+      text += '  ·  Correct: ' + lockedCount();
+    }
+    $('score').textContent = text;
+
+    if (state.submitted) {
+      $('checkBtn').textContent = 'View my result';
+      $('checkBtn').disabled = false;
+      $('submitBtn').textContent = 'Submitted ✓';
+      $('submitBtn').disabled = true;
+      $('resetBtn').hidden = true;
+    } else {
+      $('checkBtn').textContent = 'Check answers';
+      $('checkBtn').disabled = placed === 0;
+      $('submitBtn').textContent = 'Submit final answers';
+      $('submitBtn').disabled = placed < TOTAL;
+      $('resetBtn').hidden = false;
+    }
+  }
+
+  function tryPlace(name, zoneId) {
+    if (state.submitted) return;
+    if (state.locked[zoneId]) {
+      setFeedback('That card is already correct. Pick a different one.', 'good');
+      return;
+    }
+    var oldId = nameIsPlaced(name);
+    if (oldId) {
+      if (state.locked[oldId]) return;
+      delete state.zoneContent[oldId];
+      delete state.status[oldId];
+      renderZone(oldId);
+    }
+    state.zoneContent[zoneId] = name;
+    delete state.status[zoneId];
+    clearSelection();
+    renderZone(zoneId);
+    refreshBank();
+    updateCounts();
+    var left = TOTAL - placedCount();
+    setFeedback(left === 0 ? 'All tiles placed. Press Check answers, then Submit when you are happy.' :
+                             disp(name) + ' placed. ' + left + ' to go.');
+  }
+
+  function removeFrom(zoneId) {
+    var name = state.zoneContent[zoneId];
+    if (!name) return;
+    delete state.zoneContent[zoneId];
+    delete state.status[zoneId];
+    renderZone(zoneId);
+    refreshBank();
+    updateCounts();
+    setFeedback(disp(name) + ' is back in the bank.');
+  }
+
+  function onZoneClick(zoneId) {
+    var name = state.zoneContent[zoneId];
+
+    if (state.selected && !state.submitted) {
+      tryPlace(state.selected, zoneId);
+      return;
+    }
+    if (name && (state.status[zoneId] === 'correct' || state.revealed)) {
+      showProfile(countryOf(zoneId));
+      return;
+    }
+    if (name && !state.submitted) {
+      removeFrom(zoneId);
+      return;
+    }
+    if (!name && !state.submitted) {
+      setFeedback('Pick a tile from the bank first.');
+    }
+  }
+
+  function showProfile(name) {
+    var fact = FACTS[name];
+    var box = $('profileBox');
+    if (!fact) return;
+    box.innerHTML =
+      '<h3>God profile</h3>' +
+      '<span class="name-tag">' + esc(name) + '</span>' +
+      '<div class="fun">💡 ' + esc(fact) + '</div>';
+  }
+
+  function resetProfile() {
+    $('profileBox').innerHTML =
+      '<h3>God profile</h3>' +
+      '<p class="profile-empty">Check your answers, then tap a green card to read about that god.</p>';
+  }
+
+  function resetBoard() {
+    state.zoneContent = {};
+    state.status = {};
+    state.locked = {};
+    state.selected = null;
+    state.dragName = null;
+    state.checks = 0;
+    state.submitted = false;
+    state.revealed = false;
+    state.result = null;
+    state.submittedPlacements = null;
+    clearSelection();
+    ZONES.forEach(function (z) { renderZone(z.id); });
+    refreshBank();
+    resetProfile();
+    setFeedback('');
+    updateCounts();
+  }
+
+  /* ---------- Check answers (practice) ---------- */
+  function onCheck() {
+    if (state.submitted) {
+      showResult();
+      return;
+    }
+    var placements = getPlacements();
+    if (Object.keys(placements).length === 0) {
+      setFeedback('Place at least one tile first.', 'bad');
+      return;
+    }
+    var fresh = ZONES.filter(function (z) { return state.zoneContent[z.id] && !state.locked[z.id]; })
+                     .map(function (z) { return z.id; });
+    var who = state.student ? { id: state.student.id, name: state.student.name, section: state.student.section } : null;
+    callServer('checkPlacements', [placements, who, state.startedAt, fresh, state.level], function (res) {
+      if (!res || !res.ok) {
+        showModal({ title: 'Could not check', body: (res && res.message) || 'Something went wrong. Please try again.', cancelText: null });
+        return;
+      }
+      state.checks += 1;
+      var firstNew = null;
+      ZONES.forEach(function (z) {
+        if (Object.prototype.hasOwnProperty.call(res.results, z.id)) {
+          if (res.results[z.id]) {
+            if (!state.locked[z.id]) firstNew = firstNew || countryOf(z.id);
+            state.status[z.id] = 'correct';
+            state.locked[z.id] = true;
+          } else {
+            state.status[z.id] = 'wrong';
+          }
+          renderZone(z.id);
+        }
+      });
+      updateCounts();
+
+      var wrong = res.placed - res.correct;
+      if (res.correct === TOTAL) {
+        setFeedback('Excellent! All 12 cards are matched correctly. Press Submit final answers.', 'good');
+      } else if (wrong === 0) {
+        setFeedback(res.correct + ' correct so far. Keep going!', 'good');
+      } else {
+        setFeedback(res.correct + ' correct, ' + wrong + ' wrong. Tap a red card to take the tile back, then try again.', 'bad');
+      }
+      if (firstNew) showProfile(firstNew);
+    }, 'Checking your answers...');
+  }
+
+  /* ---------- Submit ---------- */
+  function onSubmit() {
+    if (state.submitted) return;
+    if (placedCount() < TOTAL) {
+      setFeedback('Place all 12 tiles before you submit.', 'bad');
+      return;
+    }
+    showModal({
+      title: 'Submit your final answers?',
+      body: 'Your score will be saved for your teacher. After you submit, you cannot change your answers.',
+      okText: 'Yes, submit',
+      cancelText: 'Keep working',
+      onOk: doSubmit
+    });
+  }
+
+  function doSubmit() {
+    var s = state.student;
+    var payload = {
+      studentId: s.id,
+      fullName: s.name,
+      section: s.section,
+      placements: getPlacements(),
+      checks: state.checks,
+      seconds: elapsedSeconds(),
+      attemptId: state.startedAt,
+      level: state.level
+    };
+    payload.seconds = Math.max(0, payload.seconds);
+
+    callServer('submitResult', [payload], function (res) {
+      if (!res || !res.ok) {
+        showModal({
+          title: res && res.duplicate ? 'Already submitted' : 'Could not submit',
+          body: (res && res.message) || 'Something went wrong. Please try again.',
+          cancelText: null
+        });
+        return;
+      }
+      state.submitted = true;
+      state.result = res;
+      state.best = res.best || state.best;
+      if (res.labels) state.labels = res.labels;
+      state.submittedPlacements = payload.placements;
+      state.finalSeconds = payload.seconds;
+      stopTimer();
+      clearSelection();
+      ZONES.forEach(function (z) {
+        if (res.results[z.id]) {
+          state.status[z.id] = 'correct';
+          state.locked[z.id] = true;
+        } else {
+          state.status[z.id] = 'wrong';
+        }
+        renderZone(z.id);
+      });
+      refreshBank();
+      updateCounts();
+      applyLevelUI();
+      setFeedback('Submitted! Your score: ' + res.score + ' / ' + res.total + '.', 'good');
+      showResult();
+    }, 'Saving your answers...');
+  }
+
+  /* ---------- Result screen ---------- */
+  function showResult() {
+    var res = state.result;
+    if (!res) return;
+
+    $('resScore').textContent = res.score;
+    $('resOutOf').textContent = 'out of ' + res.total;
+
+    var headline, message;
+    if (res.score === res.total) {
+      headline = 'Perfect score!';
+      message = 'Every answer on this level is correct.';
+    } else if (res.score >= 10) {
+      headline = 'Excellent work!';
+      message = 'You know the Olympians very well. Only a few to review.';
+    } else if (res.score >= 6) {
+      headline = 'Good effort!';
+      message = 'You know many of the gods. Look at the ones below and try to remember them.';
+    } else {
+      headline = 'Keep practising!';
+      message = 'Use the correct answers below to learn each god, then try again.';
+    }
+    $('resHeadline').textContent = headline;
+    $('resMessage').textContent = message;
+
+    var stats = [
+      'Level ' + state.level + ': ' + res.score + '/' + res.total,
+      'Total ' + overall() + ' / ' + (LV.length * TOTAL),
+      'Time ' + fmtTime(state.finalSeconds || 0),
+      'Checks used: ' + state.checks,
+      'Saved ✓'
+    ];
+    $('resStats').innerHTML = stats.map(function (t) { return '<span class="stat">' + esc(t) + '</span>'; }).join('');
+
+    var wrongHtml = '';
+    ZONES.forEach(function (z) {
+      if (!res.results[z.id]) {
+        var who = state.level === 1 ? res.key[z.id] : ((state.labels && state.labels[z.id]) || '');
+        var placed = (state.submittedPlacements || {})[z.id] || '(nothing)';
+        wrongHtml += '<li>' + (state.level === 1
+          ? 'The picture of <b>' + esc(who) + '</b>: you placed <b>' + esc(placed) + '</b>.'
+          : '<b>' + esc(who) + '</b>: you placed <b>' + esc(placed) + '</b>. Correct: <b>' + esc(res.key[z.id]) + '</b>.') + '</li>';
+      }
+    });
+    var mist = $('resMistakes');
+    if (wrongHtml) {
+      mist.className = 'mistakes';
+      mist.innerHTML = '<b>Review these:</b><ul>' + wrongHtml + '</ul>';
+    } else {
+      mist.className = 'mistakes perfect';
+      mist.innerHTML = '<b>No mistakes.</b> Every card is matched correctly.';
+    }
+
+    $('resLevelNext').hidden = state.level >= LV.length;
+    $('resultOverlay').hidden = false;
+    $('resultOverlay').scrollTop = 0;
+  }
+
+  function revealAnswers() {
+    var res = state.result;
+    if (!res) return;
+    ZONES.forEach(function (z) {
+      state.zoneContent[z.id] = res.key[z.id];
+      state.status[z.id] = 'correct';
+      state.locked[z.id] = true;
+      renderZone(z.id);
+    });
+    state.revealed = true;
+    refreshBank();
+    $('resultOverlay').hidden = true;
+    setFeedback('Correct answers are on the cards. Tap any green card to read about that god.', 'good');
+  }
+
+  /* ----------------------------------------------------------
+     6. TIMER, STUDENT FLOW
+  ---------------------------------------------------------- */
+  function startTimer() {
+    stopTimer();
+    state.startedAt = Date.now();
+    $('timer').textContent = '⏱ 00:00';
+    state.timerId = setInterval(function () {
+      $('timer').textContent = '⏱ ' + fmtTime(elapsedSeconds());
+    }, 1000);
+  }
+
+  function stopTimer() {
+    if (state.timerId) {
+      clearInterval(state.timerId);
+      state.timerId = null;
+    }
+  }
+
+  function setLoginError(text) { $('loginError').textContent = text || ''; }
+
+  function onStart() {
+    var id = $('studentId').value.replace(/\s+/g, '');
+    var name = $('fullName').value.replace(/\s+/g, ' ').trim();
+    var section = $('section').value;
+
+    if (!/^[0-9]{5}$/.test(id)) {
+      setLoginError('Please enter your 5-digit Student ID.');
+      $('studentId').focus();
+      return;
+    }
+    if (name.length < 2) {
+      setLoginError('Please enter your full name.');
+      $('fullName').focus();
+      return;
+    }
+    if (!section) {
+      setLoginError('Please choose your section.');
+      $('section').focus();
+      return;
+    }
+    setLoginError('');
+
+    callServer('verifyStudent', [id, name, section], function (res) {
+      if (!res || !res.ok) {
+        setLoginError((res && res.message) || 'Something went wrong. Please try again.');
+        return;
+      }
+      if (res.exists) {
+        var p = res.previous || {};
+        showModal({
+          title: 'Already submitted',
+          body: 'Student ID ' + res.studentId + ' has already submitted this activity.\n' +
+                (p.score !== undefined && p.score !== '' ? 'Score: ' + p.score + ' / ' + p.total + '\n' : '') +
+                'If you need to try again, ask your teacher.',
+          cancelText: null
+        });
+        return;
+      }
+      beginActivity({ id: res.studentId, name: name, section: section, best: res.best, labels: res.labels });
+    }, 'Checking your details...');
+  }
+
+  function beginActivity(student) {
+    state.student = student;
+    state.best = student.best || {};
+    state.labels = student.labels || null;
+    state.level = 1;
+    for (var n = 1; n <= LV.length; n++) { if (state.best[n] === undefined) { state.level = n; break; } }
+    var first = (Array.from ? Array.from(student.name)[0] : student.name.charAt(0)) || '?';
+    $('avatar').textContent = first.toUpperCase();
+    $('chipName').textContent = student.name;
+    $('chipMeta').textContent = 'ID ' + student.id + '  ·  ' + student.section;
+
+    buildBank();
+    resetBoard();
+    applyLevelUI();
+    $('loginScreen').hidden = true;
+    $('appScreen').hidden = false;
+    window.scrollTo(0, 0);
+    startTimer();
+    setFeedback('Welcome, ' + student.name.split(' ')[0] + '! Pick a tile to begin.');
+    loadSheetLink();
+  }
+
+  function loadSheetLink() {
+    if (state.sheetLoaded || typeof google === 'undefined' || !google.script) return;
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.ok && r.url) {
+          var a = $('sheetLink');
+          a.href = r.url;
+          a.hidden = false;
+          state.sheetLoaded = true;
+        }
+      })
+      .withFailureHandler(function () { /* the Data Sheet button simply stays hidden */ })
+      .getSheetUrl();
+  }
+
+  function onSwitchUser() {
+    var needsWarning = !state.submitted && placedCount() > 0;
+    if (!needsWarning) {
+      doSwitchUser();
+      return;
+    }
+    showModal({
+      title: 'Switch user?',
+      body: 'The answers on this screen have not been submitted. They will be cleared.',
+      okText: 'Switch user',
+      cancelText: 'Stay here',
+      onOk: doSwitchUser
+    });
+  }
+
+  function doSwitchUser() {
+    stopTimer();
+    state.student = null;
+    state.level = 1;
+    state.best = {};
+    state.labels = null;
+    buildBank();
+    $('resultOverlay').hidden = true;
+    $('appScreen').hidden = true;
+    $('loginScreen').hidden = false;
+    $('studentId').value = '';
+    $('fullName').value = '';
+    $('section').value = '';
+    setLoginError('');
+    resetBoard();
+    applyLevelUI();
+    window.scrollTo(0, 0);
+    $('studentId').focus();
+  }
+
+  function onReset() {
+    if (state.submitted) return;
+    if (placedCount() === 0) {
+      resetBoard();
+      return;
+    }
+    showModal({
+      title: 'Reset the activity?',
+      body: 'All tiles will go back to the bank and the timer will start again.',
+      okText: 'Reset',
+      cancelText: 'Cancel',
+      onOk: function () {
+        resetBoard();
+        startTimer();
+        setFeedback('Activity reset. Start again!');
+      }
+    });
+  }
+
+  function loadInitData() {
+    if (typeof google === 'undefined' || !google.script || !google.script.run) return;
+    google.script.run
+      .withSuccessHandler(function (data) {
+        if (data && data.images) { state.images = data.images; setPictures(data.images); applyLevelUI(); }
+        if (!data || !data.sections || !data.sections.length) return;
+        var select = $('section');
+        var keep = select.value;
+        select.innerHTML = '<option value="">Choose your section</option>' +
+          data.sections.map(function (s) { return '<option value="' + esc(s) + '">' + esc(s) + '</option>'; }).join('');
+        select.value = keep;
+      })
+      .withFailureHandler(function () { /* the built-in section list is already in the page */ })
+      .getInitData();
+  }
+
+  /* ----------------------------------------------------------
+     7. WIRE EVERYTHING UP
+  ---------------------------------------------------------- */
+  function init() {
+    buildBoard();
+    buildBank();
+
+    $('startBtn').addEventListener('click', onStart);
+    $('studentId').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); $('fullName').focus(); } });
+    $('fullName').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); $('section').focus(); } });
+    $('section').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); onStart(); } });
+
+    $('checkBtn').addEventListener('click', onCheck);
+    $('submitBtn').addEventListener('click', onSubmit);
+    $('resetBtn').addEventListener('click', onReset);
+    $('switchBtn').addEventListener('click', onSwitchUser);
+
+    $('modalOk').addEventListener('click', function () { closeModal('ok'); });
+    $('modalCancel').addEventListener('click', function () { closeModal('cancel'); });
+
+    $('resReveal').addEventListener('click', revealAnswers);
+    $('resClose').addEventListener('click', function () { $('resultOverlay').hidden = true; });
+    $('resNext').addEventListener('click', doSwitchUser);
+    $('resLevelNext').addEventListener('click', function () { gotoLevel(state.level + 1); });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        if (!$('modal').hidden) { closeModal('cancel'); return; }
+        if (!$('resultOverlay').hidden) { $('resultOverlay').hidden = true; return; }
+        if (state.selected) { clearSelection(); setFeedback(''); }
+      }
+    });
+
+    // Stop a missed drop from navigating the page away.
+    document.addEventListener('dragover', function (e) { e.preventDefault(); });
+    document.addEventListener('drop', function (e) { e.preventDefault(); });
+
+    window.addEventListener('beforeunload', function (e) {
+      if (state.student && !state.submitted && placedCount() > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+
+    ZONES.forEach(function (z) { renderZone(z.id); });
+    applyLevelUI();
+    updateCounts();
+    loadInitData();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>

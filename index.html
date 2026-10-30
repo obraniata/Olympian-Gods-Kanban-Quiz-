@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light only">
+  <meta name="supported-color-schemes" content="light">
+  <title>Olympian Gods Kanban Quiz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+  <?!= include('stylesheet'); ?>
+</head>
+<body>
+<div class="shell" id="godApp">
+
+  <!-- ========== PAGE HEADER ========== -->
+  <header class="masthead">
+    <h1><span>⚡ Olympian Gods Kanban Quiz</span></h1>
+    <p>Twelve gods sit on Mount Olympus. Match each god with the right name, domain, symbol, Roman name and story clue, level by level.</p>
+    <span class="tagline">Literature 6 · Matayom 6 · Greek Mythology</span>
+  </header>
+
+  <!-- ========== SCREEN 1: LOGIN ========== -->
+  <main id="loginScreen">
+    <div class="login-grid">
+      <section class="card" aria-labelledby="loginTitle">
+        <h2 id="loginTitle">Start the activity</h2>
+        <p class="sub">Fill in your details exactly as they appear in the class list.</p>
+
+        <div class="field">
+          <label for="studentId">Student ID</label>
+          <input id="studentId" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="5" placeholder="Example: 12345">
+          <div class="help">Your 5-digit Student ID.</div>
+        </div>
+
+        <div class="field">
+          <label for="fullName">Full name</label>
+          <input id="fullName" type="text" autocomplete="off" maxlength="80" placeholder="First name and last name">
+        </div>
+
+        <div class="field">
+          <label for="section">Section</label>
+          <select id="section">
+            <option value="">Choose your section</option>
+            <option value="M6/14">M6/14</option>
+            <option value="M6/15">M6/15</option>
+          </select>
+        </div>
+
+        <div class="form-error" id="loginError" role="alert" aria-live="assertive"></div>
+        <button class="btn btn-primary" id="startBtn" type="button" style="width:100%">Start the quiz</button>
+      </section>
+
+      <section class="card" aria-labelledby="howTitle">
+        <h2 id="howTitle">How to play</h2>
+        <p class="sub">Five levels, 12 points each: 60 points in all.</p>
+        <ol class="howto">
+          <li><b>Pick a tile.</b> On a computer, drag a tile onto a god card. On a phone or tablet, tap the tile first, then tap the card.</li>
+          <li><b>Level 1 is faces.</b> Match each name to the picture. From Level 2 on, every card shows its god, and you match the domain, the symbol, the Roman name and the story clue.</li>
+          <li><b>Check your answers.</b> Green is correct. Red is wrong: tap a red card to take the tile back, then try again.</li>
+          <li><b>Submit each level</b> to unlock the next one. Your scores are saved for your teacher.</li>
+        </ol>
+        <div class="about-box">
+          <b>Did you know?</b> Hades is a major Greek god, but he is not one of the twelve Olympians because he rules the Underworld instead of living on Mount Olympus.
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ========== SCREEN 2: ACTIVITY ========== -->
+  <main id="appScreen" hidden>
+
+    <div class="appbar">
+      <div class="student-chip">
+        <div class="avatar" id="avatar" aria-hidden="true">?</div>
+        <div class="who">
+          <strong id="chipName">Student</strong>
+          <span id="chipMeta">ID · Section</span>
+        </div>
+      </div>
+      <div class="appbar-actions">
+        <span class="timer-pill" id="timer" aria-label="Time used">⏱ 00:00</span>
+        <a class="btn btn-ghost btn-small" id="sheetLink" href="#" target="_blank" rel="noopener" hidden>📊 Data Sheet</a>
+        <button class="btn btn-ghost btn-small" id="switchBtn" type="button">🔄 Switch user</button>
+      </div>
+    </div>
+
+    <div class="levelbar" id="levelBar"></div>
+
+    <div class="toolbar">
+      <button class="btn btn-primary" id="checkBtn" type="button">Check answers</button>
+      <button class="btn btn-good" id="submitBtn" type="button" disabled>Submit final answers</button>
+      <button class="btn btn-ghost" id="resetBtn" type="button">Reset activity</button>
+      <div class="status" id="score" aria-live="polite">Placed: 0 / 12</div>
+    </div>
+
+    <div class="layout">
+      <section class="panel">
+        <h2>The Olympians</h2>
+        <p class="hint">Place each tile on the correct god card. Cards are numbered so you can tell them apart.</p>
+        <div class="board" id="board"></div>
+        <div id="feedback" aria-live="polite"></div>
+        <div class="legend">
+          <span class="l-good">✓ Correct</span>
+          <span class="l-bad">✕ Try again</span>
+          <span>? Not answered</span>
+        </div>
+      </section>
+
+      <aside class="panel bank-panel">
+        <h2 id="bankTitle">God name bank</h2>
+        <p class="hint" id="bankHint">Drag a name to a card, or tap a name and then tap a card.</p>
+        <div class="bank" id="bank"></div>
+
+        <div class="profile" id="profileBox" aria-live="polite">
+          <h3>God profile</h3>
+          <p class="profile-empty">Check your answers, then tap a green card to read about that god.</p>
+        </div>
+
+        <p class="teacher-note">Teacher note: this quiz covers the twelve Olympians, with Hestia as the twelfth seat. Dionysus is sometimes counted instead.</p>
+      </aside>
+    </div>
+  </main>
+
+  <p class="footer-note">Literature 6 · M6/14 and M6/15</p>
+</div>
+
+<!-- ========== RESULT SCREEN ========== -->
+<div class="overlay result-overlay" id="resultOverlay" hidden>
+  <div class="result-sheet" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+    <h2 id="resultTitle">Your result</h2>
+    <div class="score-row">
+      <div class="score-ring"><strong id="resScore">0</strong><span id="resOutOf">out of 12</span></div>
+      <div class="score-text">
+        <h2 id="resHeadline">Well done!</h2>
+        <p id="resMessage"></p>
+        <div class="stat-row" id="resStats"></div>
+      </div>
+    </div>
+
+    <div class="mistakes" id="resMistakes"></div>
+
+    <div class="result-actions">
+      <button class="btn btn-gold" id="resReveal" type="button">Show correct answers on the cards</button>
+      <button class="btn btn-ghost" id="resClose" type="button">Back to the board</button>
+      <button class="btn btn-good" id="resLevelNext" type="button">Next level ▶</button>
+      <button class="btn btn-primary" id="resNext" type="button">Next student</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== MESSAGE / CONFIRM DIALOG ========== -->
+<div class="overlay top" id="modal" hidden>
+  <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalBody">
+    <h3 id="modalTitle">Message</h3>
+    <p id="modalBody"></p>
+    <div class="dialog-actions">
+      <button class="btn btn-ghost" id="modalCancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="modalOk" type="button">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== LOADING ========== -->
+<div class="overlay top" id="loading" hidden>
+  <div class="loading-box" role="status" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <span id="loadingText">Working...</span>
+  </div>
+</div>
+
+<?!= include('script'); ?>
+</body>
+</html>
